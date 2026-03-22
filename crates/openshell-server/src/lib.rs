@@ -34,7 +34,7 @@ pub use grpc::OpenShellService;
 pub use http::{health_router, http_router};
 pub use multiplex::{MultiplexService, MultiplexedService};
 use persistence::Store;
-use sandbox::{SandboxClient, spawn_sandbox_watcher, spawn_store_reconciler};
+use sandbox::{SandboxClient, SandboxRuntime, spawn_sandbox_watcher, spawn_store_reconciler};
 use sandbox_index::SandboxIndex;
 use sandbox_watch::{SandboxWatchBus, spawn_kube_event_tailer};
 pub use tls::TlsAcceptor;
@@ -49,8 +49,8 @@ pub struct ServerState {
     /// Persistence store.
     pub store: Arc<Store>,
 
-    /// Kubernetes sandbox client.
-    pub sandbox_client: SandboxClient,
+    /// Sandbox runtime backend (Kubernetes or Firecracker).
+    pub sandbox_runtime: Arc<dyn SandboxRuntime>,
 
     /// In-memory sandbox correlation index.
     pub sandbox_index: SandboxIndex,
@@ -87,7 +87,7 @@ impl ServerState {
     pub fn new(
         config: Config,
         store: Arc<Store>,
-        sandbox_client: SandboxClient,
+        sandbox_runtime: Arc<dyn SandboxRuntime>,
         sandbox_index: SandboxIndex,
         sandbox_watch_bus: SandboxWatchBus,
         tracing_log_bus: TracingLogBus,
@@ -95,7 +95,7 @@ impl ServerState {
         Self {
             config,
             store,
-            sandbox_client,
+            sandbox_runtime,
             sandbox_index,
             sandbox_watch_bus,
             tracing_log_bus,
@@ -142,29 +142,32 @@ pub async fn run_server(config: Config, tracing_log_bus: TracingLogBus) -> Resul
 
     let sandbox_index = SandboxIndex::new();
     let sandbox_watch_bus = SandboxWatchBus::new();
+
+    // Spawn Kubernetes-specific watchers before moving sandbox_client into state.
+    spawn_sandbox_watcher(
+        store.clone(),
+        sandbox_client.clone(),
+        sandbox_index.clone(),
+        sandbox_watch_bus.clone(),
+        tracing_log_bus.clone(),
+    );
+    spawn_store_reconciler(
+        store.clone(),
+        sandbox_client.clone(),
+        sandbox_index.clone(),
+        sandbox_watch_bus.clone(),
+        tracing_log_bus.clone(),
+    );
+
+    let sandbox_runtime: Arc<dyn SandboxRuntime> = Arc::new(sandbox_client);
     let state = Arc::new(ServerState::new(
         config.clone(),
         store.clone(),
-        sandbox_client,
+        sandbox_runtime,
         sandbox_index,
         sandbox_watch_bus,
         tracing_log_bus,
     ));
-
-    spawn_sandbox_watcher(
-        store.clone(),
-        state.sandbox_client.clone(),
-        state.sandbox_index.clone(),
-        state.sandbox_watch_bus.clone(),
-        state.tracing_log_bus.clone(),
-    );
-    spawn_store_reconciler(
-        store.clone(),
-        state.sandbox_client.clone(),
-        state.sandbox_index.clone(),
-        state.sandbox_watch_bus.clone(),
-        state.tracing_log_bus.clone(),
-    );
     spawn_kube_event_tailer(state.clone());
     ssh_tunnel::spawn_session_reaper(store.clone(), std::time::Duration::from_secs(3600));
 

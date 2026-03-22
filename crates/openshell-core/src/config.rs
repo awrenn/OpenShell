@@ -84,6 +84,13 @@ pub struct Config {
     /// allowing them to reach services running on the Docker host.
     #[serde(default)]
     pub host_gateway_ip: String,
+
+    /// Sandbox runtime backend.
+    ///
+    /// `"kubernetes"` (default) uses the existing k8s CRD-based runtime.
+    /// `"firecracker"` uses Firecracker microVMs (Phase 4: full integration).
+    #[serde(default = "default_sandbox_runtime")]
+    pub sandbox_runtime: String,
 }
 
 /// TLS configuration.
@@ -133,6 +140,7 @@ impl Config {
             ssh_session_ttl_secs: default_ssh_session_ttl_secs(),
             client_tls_secret_name: String::new(),
             host_gateway_ip: String::new(),
+            sandbox_runtime: default_sandbox_runtime(),
         }
     }
 
@@ -168,6 +176,13 @@ impl Config {
     #[must_use]
     pub fn with_sandbox_image(mut self, image: impl Into<String>) -> Self {
         self.sandbox_image = image.into();
+        self
+    }
+
+    /// Set the sandbox runtime backend (`"kubernetes"` or `"firecracker"`).
+    #[must_use]
+    pub fn with_sandbox_runtime(mut self, runtime: impl Into<String>) -> Self {
+        self.sandbox_runtime = runtime.into();
         self
     }
 
@@ -259,6 +274,10 @@ fn default_log_level() -> String {
 
 fn default_sandbox_namespace() -> String {
     "default".to_string()
+}
+
+fn default_sandbox_runtime() -> String {
+    "kubernetes".to_string()
 }
 
 fn default_ssh_gateway_host() -> String {

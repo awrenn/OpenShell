@@ -3,6 +3,9 @@
 
 //! Kubernetes sandbox integration.
 
+pub mod runtime;
+pub use runtime::{FirecrackerSandboxRuntime, RuntimeCreateError, SandboxRuntime};
+
 use crate::persistence::{ObjectId, ObjectName, ObjectType, Store};
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::core::v1::{Node, Pod};
@@ -298,6 +301,66 @@ impl SandboxClient {
                 }))
             }
         }
+    }
+}
+
+impl SandboxRuntime for SandboxClient {
+    fn default_image(&self) -> &str {
+        &self.default_image
+    }
+
+    fn validate_gpu_support(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), tonic::Status>> + Send + '_>>
+    {
+        Box::pin(SandboxClient::validate_gpu_support(self))
+    }
+
+    fn create<'a>(
+        &'a self,
+        sandbox: &'a openshell_core::proto::Sandbox,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<(), RuntimeCreateError>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            match SandboxClient::create(self, sandbox).await {
+                Ok(_) => Ok(()),
+                Err(KubeError::Api(ref err)) if err.code == 409 => {
+                    Err(RuntimeCreateError::AlreadyExists)
+                }
+                Err(e) => Err(RuntimeCreateError::Other(anyhow::Error::new(e))),
+            }
+        })
+    }
+
+    fn delete<'a>(
+        &'a self,
+        sandbox_name: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<bool, anyhow::Error>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            SandboxClient::delete(self, sandbox_name)
+                .await
+                .map_err(anyhow::Error::new)
+        })
+    }
+
+    fn agent_ip<'a>(
+        &'a self,
+        identifier: &'a str,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Option<std::net::IpAddr>, anyhow::Error>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            SandboxClient::agent_pod_ip(self, identifier)
+                .await
+                .map_err(anyhow::Error::new)
+        })
     }
 }
 

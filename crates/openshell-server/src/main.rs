@@ -97,6 +97,10 @@ struct Args {
     #[arg(long, env = "OPENSHELL_HOST_GATEWAY_IP")]
     host_gateway_ip: Option<String>,
 
+    /// Sandbox runtime backend: "kubernetes" (default) or "firecracker".
+    #[arg(long, env = "OPENSHELL_SANDBOX_RUNTIME", default_value = "kubernetes")]
+    sandbox_runtime: String,
+
     /// Disable TLS entirely — listen on plaintext HTTP.
     /// Use this when the gateway sits behind a reverse proxy or tunnel
     /// (e.g. Cloudflare Tunnel) that terminates TLS at the edge.
@@ -187,6 +191,8 @@ async fn main() -> Result<()> {
     if let Some(ip) = args.host_gateway_ip {
         config = config.with_host_gateway_ip(ip);
     }
+
+    config = config.with_sandbox_runtime(args.sandbox_runtime);
 
     if args.disable_tls {
         info!("TLS disabled — listening on plaintext HTTP");

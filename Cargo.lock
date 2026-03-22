@@ -2883,6 +2883,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "openshell-firecracker"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "nix",
+ "openshell-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "openshell-ocsf"
 version = "0.0.0"
 dependencies = [

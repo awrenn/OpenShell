@@ -94,7 +94,7 @@ async fn ssh_connect(
     let connect_target = if let Some(status) = sandbox.status.as_ref()
         && !status.agent_pod.is_empty()
     {
-        match state.sandbox_client.agent_pod_ip(&status.agent_pod).await {
+        match state.sandbox_runtime.agent_ip(&status.agent_pod).await {
             Ok(Some(ip)) => ConnectTarget::Ip(SocketAddr::new(ip, state.config.sandbox_ssh_port)),
             Ok(None) => return StatusCode::BAD_GATEWAY.into_response(),
             Err(err) => {

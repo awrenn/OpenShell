@@ -53,6 +53,7 @@ use tracing::{debug, info, warn};
 use russh::ChannelMsg;
 use russh::client::AuthResult;
 
+use crate::sandbox::RuntimeCreateError;
 use crate::ServerState;
 
 /// Maximum number of records a single list RPC may return.
@@ -205,12 +206,12 @@ impl OpenShell for OpenShellService {
         let mut spec = spec;
         let template = spec.template.get_or_insert_with(SandboxTemplate::default);
         if template.image.is_empty() {
-            template.image = self.state.sandbox_client.default_image().to_string();
+            template.image = self.state.sandbox_runtime.default_image().to_string();
         }
 
         if spec.gpu {
             self.state
-                .sandbox_client
+                .sandbox_runtime
                 .validate_gpu_support()
                 .await
                 .map_err(|status| {
@@ -257,18 +258,18 @@ impl OpenShell for OpenShellService {
             .await
             .map_err(|e| Status::internal(format!("persist sandbox failed: {e}")))?;
 
-        // Now create the Kubernetes resource.  If this fails, clean up
+        // Now create the sandbox resource.  If this fails, clean up
         // the store entry to avoid orphans.
-        match self.state.sandbox_client.create(&sandbox).await {
-            Ok(_) => {}
-            Err(kube::Error::Api(err)) if err.code == 409 => {
+        match self.state.sandbox_runtime.create(&sandbox).await {
+            Ok(()) => {}
+            Err(RuntimeCreateError::AlreadyExists) => {
                 // Clean up the store entry we just wrote.
                 let _ = self.state.store.delete("sandbox", &id).await;
                 self.state.sandbox_index.remove_sandbox(&id);
                 warn!(
                     sandbox_id = %id,
                     sandbox_name = %name,
-                    "Sandbox already exists in Kubernetes"
+                    "Sandbox already exists"
                 );
                 return Err(Status::already_exists("sandbox already exists"));
             }
@@ -282,9 +283,7 @@ impl OpenShell for OpenShellService {
                     error = %err,
                     "CreateSandbox request failed"
                 );
-                return Err(Status::internal(format!(
-                    "create sandbox in kubernetes failed: {err}"
-                )));
+                return Err(Status::internal(format!("create sandbox failed: {err}")));
             }
         }
 
@@ -655,7 +654,7 @@ impl OpenShell for OpenShellService {
             );
         }
 
-        let deleted = match self.state.sandbox_client.delete(&sandbox.name).await {
+        let deleted = match self.state.sandbox_runtime.delete(&sandbox.name).await {
             Ok(deleted) => deleted,
             Err(err) => {
                 warn!(
@@ -665,7 +664,7 @@ impl OpenShell for OpenShellService {
                     "DeleteSandbox request failed"
                 );
                 return Err(Status::internal(format!(
-                    "delete sandbox in kubernetes failed: {err}"
+                    "delete sandbox failed: {err}"
                 )));
             }
         };
@@ -3377,7 +3376,7 @@ async fn resolve_sandbox_exec_target(
     if let Some(status) = sandbox.status.as_ref()
         && !status.agent_pod.is_empty()
     {
-        match state.sandbox_client.agent_pod_ip(&status.agent_pod).await {
+        match state.sandbox_runtime.agent_ip(&status.agent_pod).await {
             Ok(Some(ip)) => {
                 return Ok((ip.to_string(), state.config.sandbox_ssh_port));
             }
