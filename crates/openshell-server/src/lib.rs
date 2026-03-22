@@ -34,7 +34,10 @@ pub use grpc::OpenShellService;
 pub use http::{health_router, http_router};
 pub use multiplex::{MultiplexService, MultiplexedService};
 use persistence::Store;
-use sandbox::{SandboxClient, SandboxRuntime, spawn_sandbox_watcher, spawn_store_reconciler};
+use sandbox::{
+    FirecrackerSandboxRuntime, SandboxClient, SandboxRuntime, spawn_sandbox_watcher,
+    spawn_store_reconciler,
+};
 use sandbox_index::SandboxIndex;
 use sandbox_watch::{SandboxWatchBus, spawn_kube_event_tailer};
 pub use tls::TlsAcceptor;
@@ -143,23 +146,48 @@ pub async fn run_server(config: Config, tracing_log_bus: TracingLogBus) -> Resul
     let sandbox_index = SandboxIndex::new();
     let sandbox_watch_bus = SandboxWatchBus::new();
 
-    // Spawn Kubernetes-specific watchers before moving sandbox_client into state.
-    spawn_sandbox_watcher(
-        store.clone(),
-        sandbox_client.clone(),
-        sandbox_index.clone(),
-        sandbox_watch_bus.clone(),
-        tracing_log_bus.clone(),
-    );
-    spawn_store_reconciler(
-        store.clone(),
-        sandbox_client.clone(),
-        sandbox_index.clone(),
-        sandbox_watch_bus.clone(),
-        tracing_log_bus.clone(),
-    );
+    let sandbox_runtime: Arc<dyn SandboxRuntime> = match config.sandbox_runtime.as_str() {
+        "firecracker" => {
+            info!("Using Firecracker sandbox runtime");
+            Arc::new(FirecrackerSandboxRuntime::new(config.sandbox_image.clone()))
+        }
+        _ => {
+            // Default: Kubernetes
+            let sandbox_client = SandboxClient::new(
+                config.sandbox_namespace.clone(),
+                config.sandbox_image.clone(),
+                config.sandbox_image_pull_policy.clone(),
+                config.grpc_endpoint.clone(),
+                format!("0.0.0.0:{}", config.sandbox_ssh_port),
+                config.ssh_handshake_secret.clone(),
+                config.ssh_handshake_skew_secs,
+                config.client_tls_secret_name.clone(),
+                config.host_gateway_ip.clone(),
+            )
+            .await
+            .map_err(|e| Error::execution(format!("failed to create kubernetes client: {e}")))?;
 
-    let sandbox_runtime: Arc<dyn SandboxRuntime> = Arc::new(sandbox_client);
+            // Kubernetes-specific watchers — only with the k8s runtime.
+            spawn_sandbox_watcher(
+                store.clone(),
+                sandbox_client.clone(),
+                sandbox_index.clone(),
+                sandbox_watch_bus.clone(),
+                tracing_log_bus.clone(),
+            );
+            spawn_store_reconciler(
+                store.clone(),
+                sandbox_client.clone(),
+                sandbox_index.clone(),
+                sandbox_watch_bus.clone(),
+                tracing_log_bus.clone(),
+            );
+
+            info!("Using Kubernetes sandbox runtime");
+            Arc::new(sandbox_client)
+        }
+    };
+
     let state = Arc::new(ServerState::new(
         config.clone(),
         store.clone(),
