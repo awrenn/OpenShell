@@ -187,6 +187,28 @@ Bootstrap:
 
 ---
 
+## Shared workspaces
+
+OpenShell is currently single-player — no concept of multiple sandboxes
+sharing a working directory exists in the codebase or proto. The closest
+primitives are `volume_claim_templates` (Kubernetes PVCs) and
+`openshell sandbox upload/download` (tar-over-SSH), but nothing connects
+two sandboxes to the same filesystem.
+
+The Firecracker runtime introduces the first implementation of this concept
+via dm-snapshot:
+
+- Host directory is packed into a read-only base ext4 image once
+- Each sandbox gets a sparse copy-on-write snapshot (`dmsetup create`)
+- Agents cannot see or corrupt each other's writes
+- On sandbox destroy: operator chooses to merge changes back or discard
+
+This is additive — container sandboxes are unaffected. Multi-agent workspace
+support becomes a proto-level concern in a future phase (e.g. a
+`SharedWorkspace` resource that multiple sandboxes can attach to).
+
+---
+
 ## Open questions
 
 1. **Rootfs delivery** — ✅ decided: static ext4 image embedded/shipped with
