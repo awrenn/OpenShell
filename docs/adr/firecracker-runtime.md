@@ -189,15 +189,19 @@ Bootstrap:
 
 ## Open questions
 
-1. **Rootfs delivery** — base ext4 built from the community sandbox image.
-   How do we handle image updates? Pull from registry and rebuild, or ship
-   pre-built ext4 artifacts alongside the cluster image?
+1. **Rootfs delivery** — ✅ decided: static ext4 image embedded/shipped with
+   the cluster. Scripts provided to repull the community base image and
+   rebuild the ext4 for updates. No dynamic registry pulls at sandbox
+   creation time.
 
-2. **Guest init** — `openshell-sandbox` as PID 1, or thin init (tini) +
-   sandbox binary? PID 1 needs signal handling and zombie reaping.
+2. **Guest init** — ✅ decided: tini as PID 1, `openshell-sandbox` as child.
+   Tini handles signal forwarding and zombie reaping; sandbox binary stays
+   focused on policy enforcement.
 
-3. **Nested virt fallback** — if `/dev/kvm` is unavailable, error clearly
-   or fall back to container runtime?
+3. **Nested virt fallback** — ✅ decided: hard fail if `/dev/kvm` is
+   unavailable. No silent fallback to container runtime.
 
-4. **Snapshot boot** — Firecracker can restore from a snapshot in ~150ms.
-   Worth doing for fast sandbox creation, or scope creep for v1?
+4. **Snapshot boot** — ✅ decided: in scope for v1. Pre-boot a base VM,
+   snapshot it after `openshell-sandbox` is initialized, restore each new
+   sandbox from that snapshot (~150ms cold start). Snapshot is rebuilt
+   alongside the rootfs by the update scripts.
